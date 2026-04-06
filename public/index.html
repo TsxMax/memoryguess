@@ -579,6 +579,10 @@
           </div>
 
           <div class="team-buttons" id="teamButtons">
+            <div style="text-align:center; color:#aaa; font-size:0.75em; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px;">Mode Solo (1 joueur/équipe)</div>
+            <button class="btn btn-red btn-small" onclick="chooseTeam('red','spymaster')">🎯 Solo Rouge</button>
+            <button class="btn btn-blue btn-small" onclick="chooseTeam('blue','spymaster')">🎯 Solo Bleu</button>
+            <div style="text-align:center; color:#aaa; font-size:0.75em; text-transform:uppercase; letter-spacing:1px; margin:8px 0 4px;">Mode Classique (2+ /équipe)</div>
             <button class="btn btn-red btn-small" onclick="chooseTeam('red','spymaster')">🕵️ Maître-Espion Rouge</button>
             <button class="btn btn-red btn-small" onclick="chooseTeam('red','operative')">🔍 Agent Rouge</button>
             <button class="btn btn-blue btn-small" onclick="chooseTeam('blue','spymaster')">🕵️ Maître-Espion Bleu</button>
@@ -806,10 +810,13 @@
       const board = document.getElementById('board');
       board.innerHTML = '';
 
+      const isSolo = state.you && state.you.solo;
       const isOp = state.you && state.you.role === 'operative';
       const isMyTurn = state.you && state.you.team === state.currentTeam;
-      const canClick = isOp && isMyTurn && state.phase === 'guess';
       const isSpy = state.you && state.you.role === 'spymaster';
+      const seesColors = isSpy || isSolo;
+      // Solo player can click during guess phase; operatives too
+      const canClick = (isOp || isSolo) && isMyTurn && state.phase === 'guess';
 
       for (let i = 0; i < state.cards.length; i++) {
         const card = state.cards[i];
@@ -818,8 +825,13 @@
 
         if (card.revealed) {
           div.classList.add(card.type, 'revealed');
-        } else if (isSpy) {
+        } else if (seesColors) {
+          // Spymaster or solo: show color hints
           div.classList.add('hidden', `spy-${card.type}`);
+          if (canClick) {
+            div.classList.add('clickable');
+            div.addEventListener('click', () => selectCard(i));
+          }
         } else {
           div.classList.add('hidden');
           if (canClick) {
@@ -847,10 +859,14 @@
       const isMyTurn = state.you.team === state.currentTeam;
       const isOp = state.you.role === 'operative';
       const isSpy = state.you.role === 'spymaster';
+      const isSolo = state.you.solo;
+      // Solo players can give clues AND guess
+      const canGiveClue = isMyTurn && (isSpy || isSolo);
+      const canGuess = isMyTurn && (isOp || isSolo);
 
-      // ── Phase CLUE : le spymaster de l'équipe active donne l'indice ──
+      // ── Phase CLUE : donner un indice ──
       if (state.phase === 'clue') {
-        if (isSpy && isMyTurn) {
+        if (canGiveClue) {
           div.innerHTML = `
             <div class="clue-form">
               <input type="text" id="clueWordInput" placeholder="Mot indice..." maxlength="30">
@@ -877,18 +893,16 @@
               el.addEventListener('keypress', e => { if (e.key === 'Enter') giveClue(); });
             }
           }, 50);
-        } else if (isSpy && !isMyTurn) {
-          div.innerHTML = '<span class="waiting-msg">⏳ En attente de l\'indice de l\'équipe adverse...</span>';
+        } else if (!isMyTurn) {
+          div.innerHTML = '<span class="waiting-msg">⏳ L\'équipe adverse donne son indice...</span>';
         } else if (isOp && isMyTurn) {
           div.innerHTML = '<span class="waiting-msg">⏳ Ton Maître-Espion réfléchit à un indice...</span>';
-        } else {
-          div.innerHTML = '<span class="waiting-msg">⏳ L\'équipe adverse joue...</span>';
         }
       }
 
-      // ── Phase GUESS : les agents sélectionnent et confirment ──
+      // ── Phase GUESS : sélectionner et confirmer ──
       if (state.phase === 'guess') {
-        if (isOp && isMyTurn) {
+        if (canGuess) {
           if (state.selectedCard >= 0 && state.selectedCard < 25 && !state.cards[state.selectedCard].revealed) {
             const selectedWord = state.cards[state.selectedCard].word;
             div.innerHTML = `
@@ -910,10 +924,10 @@
               </div>
             `;
           }
-        } else if (isSpy) {
+        } else if (isSpy && !isSolo && isMyTurn) {
           const selectedInfo = state.selectedCard >= 0 ? ` — Carte sélectionnée : « ${state.cards[state.selectedCard].word} »` : '';
           div.innerHTML = `<span class="waiting-msg">🔍 Les agents devinent...${selectedInfo}</span>`;
-        } else {
+        } else if (!isMyTurn) {
           div.innerHTML = '<span class="waiting-msg">⏳ L\'équipe adverse devine...</span>';
         }
       }

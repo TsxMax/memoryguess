@@ -93,15 +93,42 @@ function createRoom(roomId) {
   };
 }
 
+function isPlayerSolo(room, player) {
+  if (!player || !player.team) return false;
+  const teammates = Object.values(room.players).filter(p => p.team === player.team);
+  return teammates.length === 1;
+}
+
+function canPlayerGiveClue(room, player) {
+  if (!player || player.team !== room.currentTeam) return false;
+  if (player.role === 'spymaster') return true;
+  if (isPlayerSolo(room, player)) return true;
+  return false;
+}
+
+function canPlayerGuess(room, player) {
+  if (!player || player.team !== room.currentTeam) return false;
+  if (player.role === 'operative') return true;
+  if (isPlayerSolo(room, player)) return true;
+  return false;
+}
+
+function canPlayerSeeBoard(room, player) {
+  if (!player) return false;
+  if (player.role === 'spymaster') return true;
+  if (isPlayerSolo(room, player)) return true;
+  return false;
+}
+
 function getRoomState(room, playerId) {
   const player = room.players[playerId];
-  const isSpymaster = player && player.role === 'spymaster';
+  const seeAll = canPlayerSeeBoard(room, player);
 
   return {
     id: room.id,
     cards: room.cards.map(c => ({
       word: c.word,
-      type: c.revealed || isSpymaster ? c.type : 'hidden',
+      type: c.revealed || seeAll ? c.type : 'hidden',
       revealed: c.revealed,
     })),
     currentTeam: room.currentTeam,
@@ -126,7 +153,7 @@ function getRoomState(room, playerId) {
     startingTeam: room.startingTeam,
     winner: room.winner,
     log: room.log,
-    you: player ? { id: player.id, name: player.name, team: player.team, role: player.role } : null,
+    you: player ? { id: player.id, name: player.name, team: player.team, role: player.role, solo: isPlayerSolo(room, player) } : null,
   };
 }
 
@@ -289,14 +316,30 @@ io.on('connection', (socket) => {
     if (room.phase !== 'lobby') return;
 
     const players = Object.values(room.players);
-    const redSpy = players.find(p => p.team === 'red' && p.role === 'spymaster');
-    const blueSpy = players.find(p => p.team === 'blue' && p.role === 'spymaster');
-    const redOp = players.find(p => p.team === 'red' && p.role === 'operative');
-    const blueOp = players.find(p => p.team === 'blue' && p.role === 'operative');
+    const redPlayers = players.filter(p => p.team === 'red');
+    const bluePlayers = players.filter(p => p.team === 'blue');
 
-    if (!redSpy || !blueSpy || !redOp || !blueOp) {
-      socket.emit('error', 'Chaque équipe doit avoir au moins 1 Maître-Espion et 1 Agent.');
+    if (redPlayers.length === 0 || bluePlayers.length === 0) {
+      socket.emit('error', 'Chaque équipe doit avoir au moins 1 joueur.');
       return;
+    }
+
+    // En mode classique (2+ par équipe), il faut un spymaster et un operative
+    if (redPlayers.length > 1) {
+      const redSpy = redPlayers.find(p => p.role === 'spymaster');
+      const redOp = redPlayers.find(p => p.role === 'operative');
+      if (!redSpy || !redOp) {
+        socket.emit('error', 'L\'équipe Rouge a besoin d\'un Maître-Espion et d\'un Agent (ou 1 seul joueur en mode solo).');
+        return;
+      }
+    }
+    if (bluePlayers.length > 1) {
+      const blueSpy = bluePlayers.find(p => p.role === 'spymaster');
+      const blueOp = bluePlayers.find(p => p.role === 'operative');
+      if (!blueSpy || !blueOp) {
+        socket.emit('error', 'L\'équipe Bleue a besoin d\'un Maître-Espion et d\'un Agent (ou 1 seul joueur en mode solo).');
+        return;
+      }
     }
 
     room.phase = 'clue';
@@ -311,7 +354,7 @@ io.on('connection', (socket) => {
     if (room.phase !== 'clue') return;
 
     const player = room.players[playerId];
-    if (!player || player.role !== 'spymaster' || player.team !== room.currentTeam) return;
+    if (!player || !canPlayerGiveClue(room, player)) return;
 
     word = (word || '').trim().toUpperCase();
     const isInfinity = count === '∞' || count === 'infinity' || count === '*';
@@ -342,7 +385,7 @@ io.on('connection', (socket) => {
     if (room.phase !== 'guess') return;
 
     const player = room.players[playerId];
-    if (!player || player.role !== 'operative' || player.team !== room.currentTeam) return;
+    if (!player || !canPlayerGuess(room, player)) return;
     if (index < 0 || index >= 25) return;
     if (room.cards[index].revealed) return;
 
@@ -356,7 +399,7 @@ io.on('connection', (socket) => {
     if (room.phase !== 'guess') return;
 
     const player = room.players[playerId];
-    if (!player || player.role !== 'operative' || player.team !== room.currentTeam) return;
+    if (!player || !canPlayerGuess(room, player)) return;
     if (room.selectedCard < 0 || room.selectedCard >= 25) {
       socket.emit('error', 'Sélectionne d\'abord une carte !'); return;
     }
@@ -419,7 +462,7 @@ io.on('connection', (socket) => {
     if (room.phase !== 'guess') return;
 
     const player = room.players[playerId];
-    if (!player || player.role !== 'operative' || player.team !== room.currentTeam) return;
+    if (!player || !canPlayerGuess(room, player)) return;
 
     addLog(room, `⏭️ ${player.name} passe. Fin du tour.`);
     endTurn(room);
