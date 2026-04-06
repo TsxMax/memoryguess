@@ -165,7 +165,7 @@ function canPlayerSeeBoard(room, player) {
 
 function getRoomState(room, playerId) {
   const player = room.players[playerId];
-  const seeAll = canPlayerSeeBoard(room, player);
+  const seeAll = canPlayerSeeBoard(room, player) && room.phase !== 'lobby';
 
   return {
     id: room.id,
